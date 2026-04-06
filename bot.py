@@ -35,12 +35,15 @@ async def start_command(message: Message):
 
 # --- Обработчики веб-сервера ---
 async def handle_root(request):
+    logger.info("Root request")
     return web.FileResponse('index.html')
 
 async def handle_index(request):
+    logger.info("Index request")
     return web.FileResponse('index.html')
 
 async def handle_health(request):
+    logger.info("Health check")
     return web.Response(text="OK")
 
 async def handle_static(request):
@@ -54,16 +57,17 @@ async def handle_static(request):
     logger.warning(f"File not found: {filename}")
     return web.Response(status=404)
 
+async def start_bot():
+    # Запускаем поллинг бота в фоне
+    await dp.start_polling(bot, drop_pending_updates=True)
+
 async def on_startup(app):
     logger.info("=== Files in /app ===")
     for f in pathlib.Path('.').iterdir():
         logger.info(f"  {f.name}")
     logger.info("=====================")
-    try:
-        logger.info("Starting bot polling...")
-        await dp.start_polling(bot, drop_pending_updates=True)
-    except Exception as e:
-        logger.exception(f"Bot polling failed: {e}")
+    # Запускаем бота без ожидания (в фоновой задаче)
+    asyncio.create_task(start_bot())
 
 def main():
     app = web.Application()
