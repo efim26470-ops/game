@@ -4,7 +4,7 @@ import pathlib
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo, Message
 from aiohttp import web
 
 logging.basicConfig(level=logging.INFO)
@@ -25,7 +25,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 @dp.message(CommandStart())
-async def start_command(message: types.Message):
+async def start_command(message: Message):
     web_app_button = KeyboardButton(
         text="✨ Открыть игру ✨",
         web_app=WebAppInfo(url=WEB_APP_URL)
@@ -33,6 +33,7 @@ async def start_command(message: types.Message):
     keyboard = ReplyKeyboardMarkup(keyboard=[[web_app_button]], resize_keyboard=True)
     await message.answer("Добро пожаловать в кликер ФЭМ!\nНажимай на логотип!", reply_markup=keyboard)
 
+# --- Обработчики веб-сервера ---
 async def handle_root(request):
     return web.FileResponse('index.html')
 
@@ -58,7 +59,6 @@ async def on_startup(app):
     for f in pathlib.Path('.').iterdir():
         logger.info(f"  {f.name}")
     logger.info("=====================")
-    # Запускаем бота с явной обработкой ошибок
     try:
         logger.info("Starting bot polling...")
         await dp.start_polling(bot, drop_pending_updates=True)
