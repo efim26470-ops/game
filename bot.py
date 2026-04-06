@@ -1,26 +1,21 @@
-import asyncio
 import os
-from dotenv import load_dotenv
+import asyncio
 from aiogram import Bot, Dispatcher, types
+from aiogram.filters import CommandStart
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from aiohttp import web
 import pathlib
 
-load_dotenv()
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-WEB_APP_URL = os.getenv('WEB_APP_URL')
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN not set in environment")
 
-if not WEB_APP_URL:
-    railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
-    if railway_domain:
-        WEB_APP_URL = f"https://{railway_domain}"
-    else:
-        WEB_APP_URL = "https://your-app.up.railway.app"
+WEB_APP_URL = os.getenv('WEB_APP_URL', 'https://your-app.up.railway.app')
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-@dp.message(commands=['start'])
+@dp.message(CommandStart())
 async def start_command(message: types.Message):
     web_app_button = KeyboardButton(
         text="✨ Открыть игру ✨",
@@ -36,11 +31,15 @@ async def start_command(message: types.Message):
         reply_markup=keyboard
     )
 
+# --- Веб-сервер для отдачи статики ---
 async def handle_root(request):
     return web.FileResponse('index.html')
 
-async def handle_index_html(request):
+async def handle_index(request):
     return web.FileResponse('index.html')
+
+async def handle_health(request):
+    return web.Response(text="OK")
 
 async def handle_static(request):
     filename = request.match_info['filename']
@@ -51,17 +50,14 @@ async def handle_static(request):
         return web.FileResponse(filename)
     return web.Response(status=404)
 
-async def handle_health(request):
-    return web.Response(text="OK")
-
 async def on_startup(app):
-    await asyncio.sleep(1)  # даём серверу время
+    # Запускаем поллинг бота
     asyncio.create_task(dp.start_polling(bot))
 
 def main():
     app = web.Application()
     app.router.add_get('/', handle_root)
-    app.router.add_get('/index.html', handle_index_html)  # для healthcheck Railway
+    app.router.add_get('/index.html', handle_index)
     app.router.add_get('/health', handle_health)
     app.router.add_get('/{filename}', handle_static)
     app.on_startup.append(on_startup)
