@@ -10,13 +10,12 @@ load_dotenv()
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 WEB_APP_URL = os.getenv('WEB_APP_URL')
 
-# Если WEB_APP_URL не задан, используем домен Railway
 if not WEB_APP_URL:
     railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
     if railway_domain:
         WEB_APP_URL = f"https://{railway_domain}"
     else:
-        WEB_APP_URL = "https://your-app.up.railway.app"  # заменится позже
+        WEB_APP_URL = "https://your-app.up.railway.app"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -37,12 +36,14 @@ async def start_command(message: types.Message):
         reply_markup=keyboard
     )
 
-async def handle_html(request):
+async def handle_root(request):
+    return web.FileResponse('index.html')
+
+async def handle_index_html(request):
     return web.FileResponse('index.html')
 
 async def handle_static(request):
     filename = request.match_info['filename']
-    # Простая защита
     if '..' in filename or filename.startswith('/'):
         return web.Response(status=403)
     path = pathlib.Path(filename)
@@ -54,12 +55,13 @@ async def handle_health(request):
     return web.Response(text="OK")
 
 async def on_startup(app):
-    # Запускаем бота в фоне
+    await asyncio.sleep(1)  # даём серверу время
     asyncio.create_task(dp.start_polling(bot))
 
 def main():
     app = web.Application()
-    app.router.add_get('/', handle_html)
+    app.router.add_get('/', handle_root)
+    app.router.add_get('/index.html', handle_index_html)  # для healthcheck Railway
     app.router.add_get('/health', handle_health)
     app.router.add_get('/{filename}', handle_static)
     app.on_startup.append(on_startup)
