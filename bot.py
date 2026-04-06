@@ -1,16 +1,22 @@
 import os
 import asyncio
+import pathlib
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from aiohttp import web
-import pathlib
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not set in environment")
+    raise ValueError("BOT_TOKEN not set")
 
-WEB_APP_URL = os.getenv('WEB_APP_URL', 'https://your-app.up.railway.app')
+WEB_APP_URL = os.getenv('WEB_APP_URL')
+if not WEB_APP_URL:
+    railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
+    if railway_domain:
+        WEB_APP_URL = f"https://{railway_domain}"
+    else:
+        WEB_APP_URL = "https://your-app.up.railway.app"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -21,21 +27,16 @@ async def start_command(message: types.Message):
         text="✨ Открыть игру ✨",
         web_app=WebAppInfo(url=WEB_APP_URL)
     )
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[web_app_button]],
-        resize_keyboard=True
-    )
-    await message.answer(
-        "Добро пожаловать в кликер факультета экономики и менеджмента!\n\n"
-        "Нажимай на логотип ФЭМ, зарабатывай очки и становись лучшим!",
-        reply_markup=keyboard
-    )
+    keyboard = ReplyKeyboardMarkup(keyboard=[[web_app_button]], resize_keyboard=True)
+    await message.answer("Добро пожаловать в кликер ФЭМ!\nНажимай на логотип!", reply_markup=keyboard)
 
-# --- Веб-сервер для отдачи статики ---
+# --- Веб-сервер ---
 async def handle_root(request):
+    print("Request /")
     return web.FileResponse('index.html')
 
 async def handle_index(request):
+    print("Request /index.html")
     return web.FileResponse('index.html')
 
 async def handle_health(request):
@@ -43,15 +44,18 @@ async def handle_health(request):
 
 async def handle_static(request):
     filename = request.match_info['filename']
-    if '..' in filename or filename.startswith('/'):
-        return web.Response(status=403)
+    print(f"Request static: {filename}")
     path = pathlib.Path(filename)
     if path.exists() and path.is_file():
         return web.FileResponse(filename)
     return web.Response(status=404)
 
 async def on_startup(app):
-    # Запускаем поллинг бота
+    # Выводим список файлов в текущей директории для отладки
+    print("=== Files in /app ===")
+    for f in pathlib.Path('.').iterdir():
+        print(f"  {f.name}")
+    print("=====================")
     asyncio.create_task(dp.start_polling(bot))
 
 def main():
