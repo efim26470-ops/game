@@ -32,12 +32,16 @@ if not DATABASE_URL:
         DATABASE_URL = f"postgresql://{PGUSER}:{PGPASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}"
 
 if not DATABASE_URL:
-    raise ValueError("No database connection string found")
-
-db_pool = None
+    logger.warning("No database connection string found. Scores will not be saved.")
+    db_pool = None
+else:
+    db_pool = None
 
 async def init_db():
     global db_pool
+    if not DATABASE_URL:
+        logger.warning("Skipping DB init: no DATABASE_URL")
+        return
     db_pool = await asyncpg.create_pool(DATABASE_URL)
     async with db_pool.acquire() as conn:
         await conn.execute('''
@@ -51,6 +55,8 @@ async def init_db():
         logger.info("Database initialized")
 
 async def get_top_scores(limit=10):
+    if not db_pool:
+        return []
     async with db_pool.acquire() as conn:
         rows = await conn.fetch('''
             SELECT username, score FROM scores
@@ -60,6 +66,8 @@ async def get_top_scores(limit=10):
         return rows
 
 async def update_score(user_id: int, username: str, score: int):
+    if not db_pool:
+        return
     async with db_pool.acquire() as conn:
         await conn.execute('''
             INSERT INTO scores (user_id, username, score, updated_at)
@@ -69,6 +77,8 @@ async def update_score(user_id: int, username: str, score: int):
         ''', user_id, username, score)
 
 async def get_user_score(user_id: int):
+    if not db_pool:
+        return 0
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow('SELECT score FROM scores WHERE user_id = $1', user_id)
         return row['score'] if row else 0
@@ -125,6 +135,8 @@ async def handle_static(request):
     return web.Response(status=404)
 
 async def handle_score(request):
+    if not db_pool:
+        return web.Response(status=503, text="Database not available")
     try:
         data = await request.json()
         user_id = data.get('user_id')
@@ -139,6 +151,8 @@ async def handle_score(request):
         return web.Response(status=500, text=str(e))
 
 async def handle_get_score(request):
+    if not db_pool:
+        return web.json_response({'score': 0})
     user_id = request.query.get('user_id')
     if not user_id:
         return web.Response(status=400, text="Missing user_id")
@@ -150,6 +164,8 @@ async def handle_get_score(request):
         return web.Response(status=500, text=str(e))
 
 async def handle_top(request):
+    if not db_pool:
+        return web.json_response({'top': []})
     try:
         top = await get_top_scores(limit=10)
         top_list = [{'username': row['username'], 'score': row['score']} for row in top]
