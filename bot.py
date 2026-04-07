@@ -3,12 +3,11 @@ import asyncpg
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
 # ---------- Конфигурация ----------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
-# Railway сам подставляет RAILWAY_PUBLIC_DOMAIN, но можно указать вручную
 PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "game-zhelezkin.up.railway.app")
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"https://{PUBLIC_DOMAIN}{WEBHOOK_PATH}"
@@ -17,7 +16,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 db_pool = None
 
-# ---------- Инициализация БД ----------
+# ---------- База данных ----------
 async def init_db():
     global db_pool
     db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
@@ -60,7 +59,7 @@ async def get_top_users(limit: int = 10):
         """, limit)
         return [{"username": r["username"] or "Anonymous", "first_name": r["first_name"], "score": r["score"]} for r in rows]
 
-# ---------- Обработчики команд Telegram ----------
+# ---------- Команды бота ----------
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
@@ -96,7 +95,7 @@ async def cmd_top(message: types.Message):
         text += f"{i}. {name} — {user['score']} очков\n"
     await message.answer(text)
 
-# ---------- Веб-обработчики для статики и API ----------
+# ---------- Веб-обработчики (статический сайт + API) ----------
 async def handle_index(request):
     return web.FileResponse("index.html")
 
@@ -113,13 +112,13 @@ async def handle_api_top(request):
     top = await get_top_users(10)
     return web.json_response(top)
 
-# ---------- Жизненный цикл приложения ----------
-async def on_startup():
+# ---------- Жизненный цикл приложения (с правильными сигнатурами) ----------
+async def on_startup(app: web.Application):
     await init_db()
     await bot.set_webhook(WEBHOOK_URL)
     print(f"✅ Webhook set to {WEBHOOK_URL}")
 
-async def on_shutdown():
+async def on_shutdown(app: web.Application):
     await bot.delete_webhook()
     if db_pool:
         await db_pool.close()
@@ -140,10 +139,9 @@ def main():
     webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_requests_handler.register(app, path=WEBHOOK_PATH)
     
-    # Настройка startup/shutdown
+    # Регистрируем startup/shutdown с правильными сигнатурами
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
-    setup_application(app, dp, bot=bot)
     
     port = int(os.getenv("PORT", 8080))
     web.run_app(app, host="0.0.0.0", port=port)
