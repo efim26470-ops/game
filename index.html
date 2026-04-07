@@ -6,6 +6,65 @@
     <title>FEM Clicker Game</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="style.css">
+    <style>
+        /* Стили для модального окна топа */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: var(--tg-theme-bg-color);
+            color: var(--tg-theme-text-color);
+            padding: 20px;
+            border-radius: 20px;
+            width: 80%;
+            max-width: 400px;
+            text-align: center;
+        }
+        .modal-content h2 {
+            margin-top: 0;
+        }
+        .modal-content ol {
+            text-align: left;
+            max-height: 300px;
+            overflow-y: auto;
+            padding-left: 20px;
+        }
+        .close-btn {
+            background: var(--tg-theme-button-color);
+            color: var(--tg-theme-button-text-color);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            margin-top: 15px;
+            cursor: pointer;
+        }
+        .top-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--tg-theme-button-color);
+            color: var(--tg-theme-button-text-color);
+            border: none;
+            border-radius: 50px;
+            padding: 12px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 100;
+        }
+        @media (max-width: 600px) {
+            .top-btn { bottom: 10px; right: 10px; padding: 8px 16px; font-size: 14px; }
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -17,7 +76,59 @@
         </div>
         <p class="tap-hint">👆 Нажми на логотип ФЭМ</p>
     </div>
-    <!-- Добавлен параметр версии, чтобы Telegram не кэшировал старый скрипт -->
+
+    <button class="top-btn" id="topButton">🏆 Топ игроков</button>
+
+    <!-- Модальное окно для топа -->
+    <div id="topModal" class="modal">
+        <div class="modal-content">
+            <h2>🏆 Топ игроков</h2>
+            <div id="topList">Загрузка...</div>
+            <button class="close-btn" id="closeModal">Закрыть</button>
+        </div>
+    </div>
+
     <script src="script.js?v=20260407"></script>
+    <script>
+        // Отдельный скрипт для работы с топом (не зависит от основного)
+        const modal = document.getElementById('topModal');
+        const topButton = document.getElementById('topButton');
+        const closeModalBtn = document.getElementById('closeModal');
+        const topListDiv = document.getElementById('topList');
+
+        async function fetchTop() {
+            try {
+                const response = await fetch('/api/top');
+                if (!response.ok) throw new Error('Network error');
+                const data = await response.json();
+                if (data.top && data.top.length > 0) {
+                    let html = '<ol>';
+                    data.top.forEach((item, index) => {
+                        html += `<li><strong>${item.username || 'Аноним'}</strong> — ${item.score} 💥</li>`;
+                    });
+                    html += '</ol>';
+                    topListDiv.innerHTML = html;
+                } else {
+                    topListDiv.innerHTML = '<p>Пока нет игроков. Будь первым!</p>';
+                }
+            } catch (err) {
+                console.error(err);
+                topListDiv.innerHTML = '<p>Ошибка загрузки топа</p>';
+            }
+        }
+
+        topButton.addEventListener('click', () => {
+            modal.style.display = 'flex';
+            fetchTop();
+        });
+
+        closeModalBtn.addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+
+        window.addEventListener('click', (e) => {
+            if (e.target === modal) modal.style.display = 'none';
+        });
+    </script>
 </body>
 </html>

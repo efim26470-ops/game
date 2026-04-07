@@ -1,55 +1,81 @@
 (function() {
-    // Инициализация Telegram WebApp
     const tg = window.Telegram.WebApp;
     tg.expand();
     tg.ready();
 
-    // Получаем элементы
     const scoreElement = document.getElementById('score');
     const clickableImage = document.getElementById('clickableImage');
 
-    // Проверяем, что элементы существуют
-    if (!scoreElement) {
-        console.error('Ошибка: элемент #score не найден');
-        return;
-    }
-    if (!clickableImage) {
-        console.error('Ошибка: элемент #clickableImage не найден');
+    if (!scoreElement || !clickableImage) {
+        console.error('Elements not found');
         return;
     }
 
     let score = 0;
+    let userId = tg.initDataUnsafe?.user?.id;
+    let username = tg.initDataUnsafe?.user?.username || `user_${userId}`;
 
-    // Функция обновления счёта на экране
-    function updateScore() {
-        scoreElement.innerText = score;
+    if (!userId) {
+        console.warn('No user ID, game will work but score will not be saved');
+        userId = null;
     }
 
-    // Функция вибрации (если поддерживается)
-    function vibrate() {
+    // Загрузка сохранённого счёта с сервера
+    async function loadScore() {
+        if (!userId) return;
         try {
-            if (tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred) {
-                tg.HapticFeedback.impactOccurred('light');
+            const response = await fetch(`/api/score?user_id=${userId}`);
+            const data = await response.json();
+            if (data.score !== undefined) {
+                score = data.score;
+                scoreElement.innerText = score;
             }
         } catch(e) {
-            // Игнорируем ошибки вибрации
+            console.error('Failed to load score:', e);
         }
     }
 
-    // Обработчик клика
+    // Отправка счёта на сервер
+    async function saveScore() {
+        if (!userId) return;
+        try {
+            await fetch('/api/score', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, username: username, score: score })
+            });
+        } catch(e) {
+            console.error('Failed to save score:', e);
+        }
+    }
+
+    function updateScoreDisplay() {
+        scoreElement.innerText = score;
+    }
+
+    function vibrate() {
+        try {
+            if (tg.HapticFeedback && tg.HapticFeedback.impactOccurred) {
+                tg.HapticFeedback.impactOccurred('light');
+            }
+        } catch(e) {}
+    }
+
     function handleClick() {
         score++;
-        updateScore();
+        updateScoreDisplay();
         vibrate();
-        // Анимация нажатия
         clickableImage.style.transform = 'scale(0.95)';
         setTimeout(() => {
             clickableImage.style.transform = 'scale(1)';
         }, 100);
+        // Сохраняем счёт на сервере (но не чаще раза в секунду, можно добавить throttle)
+        saveScore();
     }
 
-    // Назначаем обработчик
     clickableImage.addEventListener('click', handleClick);
-    // Резервный вариант для старых браузеров
     clickableImage.onclick = handleClick;
+
+    // Загружаем сохранённый счёт
+    loadScore();
 })();
