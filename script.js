@@ -7,52 +7,81 @@
     const clickableImage = document.getElementById('clickableImage');
 
     if (!scoreElement || !clickableImage) {
-        console.error('Elements not found');
+        console.error('❌ Элементы #score или #clickableImage не найдены');
         return;
     }
 
-    let score = 0;
-    let userId = tg.initDataUnsafe?.user?.id;
-    let username = tg.initDataUnsafe?.user?.username || `user_${userId}`;
+    // Получаем данные пользователя
+    let userId = null;
+    let username = "Anonymous";
 
-    if (!userId) {
-        console.warn('No user ID, game will work but score will not be saved');
-        userId = null;
+    try {
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            userId = tg.initDataUnsafe.user.id;
+            username = tg.initDataUnsafe.user.username || `user_${userId}`;
+            console.log(`✅ User ID: ${userId}, Username: ${username}`);
+        } else {
+            console.warn('⚠️ Нет данных пользователя. Возможно, бот не запросил user. Используем fallback.');
+            // Fallback: попросим пользователя нажать кнопку, чтобы получить ID
+            userId = null;
+        }
+    } catch(e) {
+        console.error('Ошибка получения user:', e);
     }
 
-    // Загрузка сохранённого счёта с сервера
+    let score = 0;
+
+    // Загрузка сохранённого счёта
     async function loadScore() {
-        if (!userId) return;
+        if (!userId) {
+            console.warn('Нет user_id, загрузка счёта невозможна');
+            return;
+        }
         try {
             const response = await fetch(`/api/score?user_id=${userId}`);
-            const data = await response.json();
-            if (data.score !== undefined) {
-                score = data.score;
-                scoreElement.innerText = score;
+            if (response.ok) {
+                const data = await response.json();
+                if (data.score !== undefined) {
+                    score = data.score;
+                    scoreElement.innerText = score;
+                    console.log(`📥 Загружен счёт: ${score}`);
+                }
+            } else {
+                console.error('Ошибка загрузки счёта:', response.status);
             }
         } catch(e) {
-            console.error('Failed to load score:', e);
+            console.error('Ошибка сети при загрузке счёта:', e);
         }
     }
 
-    // Отправка счёта на сервер
+    // Сохранение счёта на сервере
     async function saveScore() {
-        if (!userId) return;
+        if (!userId) {
+            console.warn('Нет user_id, счёт не сохранён');
+            return;
+        }
         try {
-            await fetch('/api/score', {
+            const response = await fetch('/api/score', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ user_id: userId, username: username, score: score })
             });
+            if (response.ok) {
+                console.log(`💾 Счёт ${score} сохранён`);
+            } else {
+                console.error('Ошибка сохранения счёта:', response.status);
+            }
         } catch(e) {
-            console.error('Failed to save score:', e);
+            console.error('Ошибка сети при сохранении:', e);
         }
     }
 
-    function updateScoreDisplay() {
+    // Обновление отображения счёта
+    function updateDisplay() {
         scoreElement.innerText = score;
     }
 
+    // Вибрация
     function vibrate() {
         try {
             if (tg.HapticFeedback && tg.HapticFeedback.impactOccurred) {
@@ -61,21 +90,24 @@
         } catch(e) {}
     }
 
+    // Обработчик клика
     function handleClick() {
         score++;
-        updateScoreDisplay();
+        updateDisplay();
         vibrate();
+        // Анимация
         clickableImage.style.transform = 'scale(0.95)';
         setTimeout(() => {
             clickableImage.style.transform = 'scale(1)';
         }, 100);
-        // Сохраняем счёт на сервере (но не чаще раза в секунду, можно добавить throttle)
+        // Сохраняем (можно добавить throttle, но пока просто)
         saveScore();
     }
 
+    // Назначаем обработчик
     clickableImage.addEventListener('click', handleClick);
     clickableImage.onclick = handleClick;
 
-    // Загружаем сохранённый счёт
+    // Загружаем счёт при старте
     loadScore();
 })();
