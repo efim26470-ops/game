@@ -1,203 +1,157 @@
 import os
-import asyncio
-import pathlib
-import logging
-from aiogram import Bot, Dispatcher
-from aiogram.filters import CommandStart, Command
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo, Message
-from aiohttp import web
 import asyncpg
+from aiohttp import web
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from datetime import datetime
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# ---------- Конфигурация ----------
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Обязательно добавьте в Railway Variables
+DATABASE_URL = os.getenv("DATABASE_URL")
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"https://{os.getenv('RAILWAY_PUBLIC_DOMAIN', 'game-zhelezkin.up.railway.app')}{WEBHOOK_PATH}"
+# Если домен не задан, подставьте свой. В Railway можно получить через переменную RAILWAY_PUBLIC_DOMAIN.
 
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not set")
-
-WEB_APP_URL = os.getenv('WEB_APP_URL')
-if not WEB_APP_URL:
-    railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
-    WEB_APP_URL = f"https://{railway_domain}/index.html" if railway_domain else "https://your-app.up.railway.app/index.html"
-
-# --- PostgreSQL ---
-DATABASE_URL = os.getenv('DATABASE_URL')
-if not DATABASE_URL:
-    PGHOST = os.getenv('PGHOST')
-    PGDATABASE = os.getenv('PGDATABASE')
-    PGUSER = os.getenv('PGUSER')
-    PGPASSWORD = os.getenv('PGPASSWORD')
-    PGPORT = os.getenv('PGPORT', '5432')
-    if all([PGHOST, PGDATABASE, PGUSER, PGPASSWORD]):
-        DATABASE_URL = f"postgresql://{PGUSER}:{PGPASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}"
-
-if not DATABASE_URL:
-    logger.warning("No database connection string found. Scores will not be saved.")
-    db_pool = None
-else:
-    db_pool = None
-
-async def init_db():
-    global db_pool
-    if not DATABASE_URL:
-        logger.warning("Skipping DB init: no DATABASE_URL")
-        return
-    db_pool = await asyncpg.create_pool(DATABASE_URL)
-    async with db_pool.acquire() as conn:
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS scores (
-                user_id BIGINT PRIMARY KEY,
-                username TEXT,
-                score INTEGER DEFAULT 0,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        logger.info("Database initialized")
-
-async def get_top_scores(limit=10):
-    if not db_pool:
-        return []
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch('''
-            SELECT username, score FROM scores
-            ORDER BY score DESC
-            LIMIT $1
-        ''', limit)
-        return rows
-
-async def update_score(user_id: int, username: str, score: int):
-    if not db_pool:
-        return
-    async with db_pool.acquire() as conn:
-        await conn.execute('''
-            INSERT INTO scores (user_id, username, score, updated_at)
-            VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-            ON CONFLICT (user_id) DO UPDATE
-            SET score = EXCLUDED.score, username = EXCLUDED.username, updated_at = CURRENT_TIMESTAMP
-        ''', user_id, username, score)
-
-async def get_user_score(user_id: int):
-    if not db_pool:
-        return 0
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow('SELECT score FROM scores WHERE user_id = $1', user_id)
-        return row['score'] if row else 0
-
-# --- Бот ---
+# ---------- Инициализация бота и диспетчера ----------
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-@dp.message(CommandStart())
-async def start_command(message: Message):
-    user_id = message.from_user.id
-    username = message.from_user.username or f"user_{user_id}"
-    current_score = await get_user_score(user_id)
-    web_app_button = KeyboardButton(
-        text="✨ Открыть игру ✨",
-        web_app=WebAppInfo(url=WEB_APP_URL)
-    )
-    keyboard = ReplyKeyboardMarkup(keyboard=[[web_app_button]], resize_keyboard=True)
+# Глобальная переменная для пула соединений с БД
+db_pool = None
+
+# ---------- Работа с базой данных ----------
+async def init_db():
+    global db_pool
+    db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                score INTEGER DEFAULT 0,
+                last_updated TIMESTAMP DEFAULT NOW()
+            )
+        """)
+    print("Database initialized and table ready")
+
+async def get_user_score(user_id: int) -> int:
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT score FROM users WHERE user_id = $1", user_id)
+        return row["score"] if row else 0
+
+async def update_user_score(user_id: int, username: str, first_name: str, delta: int):
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO users (user_id, username, first_name, score, last_updated)
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (user_id) DO UPDATE
+            SET score = users.score + $4,
+                username = EXCLUDED.username,
+                first_name = EXCLUDED.first_name,
+                last_updated = NOW()
+        """, user_id, username, first_name, delta)
+
+async def get_top_users(limit: int = 10):
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT username, first_name, score
+            FROM users
+            ORDER BY score DESC
+            LIMIT $1
+        """, limit)
+        return [{"username": r["username"] or "Anonymous", "first_name": r["first_name"], "score": r["score"]} for r in rows]
+
+# ---------- Обработчики команд ----------
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
     await message.answer(
-        f"Добро пожаловать в кликер ФЭМ!\nТвой текущий счёт: {current_score}\nНажимай на логотип!",
-        reply_markup=keyboard
+        "👋 Привет! Это кликер-игра для FEM.\n"
+        "🔹 Нажми /click — заработай очко.\n"
+        "🔹 /top — показать топ игроков.\n"
+        "🔹 /profile — твой счёт."
     )
 
-@dp.message(Command('top'))
-async def top_command(message: Message):
-    top = await get_top_scores()
+@dp.message(Command("click"))
+async def cmd_click(message: types.Message):
+    user_id = message.from_user.id
+    username = message.from_user.username or ""
+    first_name = message.from_user.first_name or ""
+    await update_user_score(user_id, username, first_name, 1)
+    new_score = await get_user_score(user_id)
+    await message.answer(f"➕ +1 очко! Теперь у тебя {new_score} очков.")
+
+@dp.message(Command("profile"))
+async def cmd_profile(message: types.Message):
+    user_id = message.from_user.id
+    score = await get_user_score(user_id)
+    await message.answer(f"📊 Твой счёт: {score} очков.")
+
+@dp.message(Command("top"))
+async def cmd_top(message: types.Message):
+    top = await get_top_users(10)
     if not top:
-        await message.answer("Пока нет ни одного игрока. Будь первым!")
+        await message.answer("Пока ни одного игрока. Нажми /click, чтобы начать!")
         return
-    text = "🏆 *Топ игроков* 🏆\n\n"
-    for i, row in enumerate(top, 1):
-        username = row['username'] or "Аноним"
-        score = row['score']
-        text += f"{i}. {username} — {score} 💥\n"
-    await message.answer(text, parse_mode="Markdown")
+    text = "🏆 Топ-10 игроков:\n\n"
+    for i, user in enumerate(top, 1):
+        name = user["first_name"] or user["username"]
+        text += f"{i}. {name} — {user['score']} очков\n"
+    await message.answer(text)
 
-# --- Веб-сервер ---
-async def handle_root(request):
-    return web.FileResponse('index.html')
-
+# ---------- Веб-обработчики (статический сайт + API) ----------
 async def handle_index(request):
-    return web.FileResponse('index.html')
+    return web.FileResponse("index.html")
 
-async def handle_health(request):
-    return web.Response(text="OK")
+async def handle_script(request):
+    return web.FileResponse("script.js")
 
-async def handle_static(request):
-    filename = request.match_info['filename']
-    if '..' in filename or filename.startswith('/'):
-        return web.Response(status=403)
-    p = pathlib.Path(filename)
-    if p.exists() and p.is_file():
-        return web.FileResponse(filename)
-    return web.Response(status=404)
+async def handle_style(request):
+    return web.FileResponse("style.css")
 
-async def handle_score(request):
-    if not db_pool:
-        return web.Response(status=503, text="Database not available")
-    try:
-        data = await request.json()
-        user_id = data.get('user_id')
-        username = data.get('username')
-        score = data.get('score')
-        if user_id is None or score is None:
-            return web.Response(status=400, text="Missing fields")
-        await update_score(user_id, username, score)
-        return web.Response(status=200, text="OK")
-    except Exception as e:
-        logger.error(f"Error updating score: {e}")
-        return web.Response(status=500, text=str(e))
+async def handle_logo(request):
+    return web.FileResponse("fem_logo.png")
 
-async def handle_get_score(request):
-    if not db_pool:
-        return web.json_response({'score': 0})
-    user_id = request.query.get('user_id')
-    if not user_id:
-        return web.Response(status=400, text="Missing user_id")
-    try:
-        user_id = int(user_id)
-        score = await get_user_score(user_id)
-        return web.json_response({'score': score})
-    except Exception as e:
-        return web.Response(status=500, text=str(e))
+async def handle_api_top(request):
+    top = await get_top_users(10)
+    return web.json_response(top)
 
-async def handle_top(request):
-    if not db_pool:
-        return web.json_response({'top': []})
-    try:
-        top = await get_top_scores(limit=10)
-        top_list = [{'username': row['username'], 'score': row['score']} for row in top]
-        return web.json_response({'top': top_list})
-    except Exception as e:
-        logger.error(f"Error fetching top: {e}")
-        return web.json_response({'error': str(e)}, status=500)
-
-async def start_bot():
+# ---------- Основная функция запуска ----------
+async def on_startup():
     await init_db()
-    await dp.start_polling(bot, drop_pending_updates=True)
+    # Устанавливаем вебхук Telegram
+    await bot.set_webhook(WEBHOOK_URL)
+    print(f"Webhook set to {WEBHOOK_URL}")
 
-async def on_startup(app):
-    logger.info("=== Files in /app ===")
-    for f in pathlib.Path('.').iterdir():
-        logger.info(f"  {f.name}")
-    logger.info("=====================")
-    asyncio.create_task(start_bot())
+async def on_shutdown():
+    await bot.delete_webhook()
+    if db_pool:
+        await db_pool.close()
+    print("Shutdown complete")
 
 def main():
     app = web.Application()
-    app.router.add_get('/', handle_root)
-    app.router.add_get('/index.html', handle_index)
-    app.router.add_get('/health', handle_health)
-    app.router.add_get('/{filename}', handle_static)
-    app.router.add_post('/api/score', handle_score)
-    app.router.add_get('/api/score', handle_get_score)
-    app.router.add_get('/api/top', handle_top)
+    
+    # Статические файлы
+    app.router.add_get("/", handle_index)
+    app.router.add_get("/index.html", handle_index)
+    app.router.add_get("/script.js", handle_script)
+    app.router.add_get("/style.css", handle_style)
+    app.router.add_get("/fem_logo.png", handle_logo)
+    app.router.add_get("/api/top", handle_api_top)
+    
+    # Webhook для Telegram
+    webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+    webhook_requests_handler.register(app, path=WEBHOOK_PATH)
+    
+    # Настройка жизненного цикла
     app.on_startup.append(on_startup)
-    port = int(os.environ.get('PORT', 8080))
-    logger.info(f"Starting server on port {port}")
-    web.run_app(app, host='0.0.0.0', port=port)
+    app.on_shutdown.append(on_shutdown)
+    setup_application(app, dp, bot=bot)
+    
+    port = int(os.getenv("PORT", 8080))
+    web.run_app(app, host="0.0.0.0", port=port)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
