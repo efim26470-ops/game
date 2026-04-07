@@ -7,107 +7,64 @@
     const clickableImage = document.getElementById('clickableImage');
 
     if (!scoreElement || !clickableImage) {
-        console.error('❌ Элементы #score или #clickableImage не найдены');
+        console.error('Elements not found');
         return;
     }
 
-    // Получаем данные пользователя
+    // Получаем user_id из Telegram
     let userId = null;
     let username = "Anonymous";
-
     try {
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
             userId = tg.initDataUnsafe.user.id;
             username = tg.initDataUnsafe.user.username || `user_${userId}`;
-            console.log(`✅ User ID: ${userId}, Username: ${username}`);
+            console.log('User ID:', userId);
         } else {
-            console.warn('⚠️ Нет данных пользователя. Возможно, бот не запросил user. Используем fallback.');
-            // Fallback: попросим пользователя нажать кнопку, чтобы получить ID
-            userId = null;
+            console.warn('No user data, trying to get via initData');
         }
     } catch(e) {
-        console.error('Ошибка получения user:', e);
+        console.error('Error getting user:', e);
     }
 
     let score = 0;
 
-    // Загрузка сохранённого счёта
     async function loadScore() {
-        if (!userId) {
-            console.warn('Нет user_id, загрузка счёта невозможна');
-            return;
-        }
+        if (!userId) return;
         try {
-            const response = await fetch(`/api/score?user_id=${userId}`);
-            if (response.ok) {
-                const data = await response.json();
-                if (data.score !== undefined) {
-                    score = data.score;
-                    scoreElement.innerText = score;
-                    console.log(`📥 Загружен счёт: ${score}`);
-                }
-            } else {
-                console.error('Ошибка загрузки счёта:', response.status);
+            const res = await fetch(`/api/score?user_id=${userId}`);
+            if (res.ok) {
+                const data = await res.json();
+                score = data.score || 0;
+                scoreElement.innerText = score;
+                console.log('Loaded score:', score);
             }
-        } catch(e) {
-            console.error('Ошибка сети при загрузке счёта:', e);
-        }
+        } catch(e) { console.error('Load error:', e); }
     }
 
-    // Сохранение счёта на сервере
     async function saveScore() {
-        if (!userId) {
-            console.warn('Нет user_id, счёт не сохранён');
-            return;
-        }
+        if (!userId) return;
         try {
-            const response = await fetch('/api/score', {
+            await fetch('/api/score', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: userId, username: username, score: score })
+                body: JSON.stringify({ user_id: userId, username, score })
             });
-            if (response.ok) {
-                console.log(`💾 Счёт ${score} сохранён`);
-            } else {
-                console.error('Ошибка сохранения счёта:', response.status);
-            }
-        } catch(e) {
-            console.error('Ошибка сети при сохранении:', e);
-        }
+            console.log('Saved score:', score);
+        } catch(e) { console.error('Save error:', e); }
     }
 
-    // Обновление отображения счёта
-    function updateDisplay() {
-        scoreElement.innerText = score;
-    }
-
-    // Вибрация
-    function vibrate() {
-        try {
-            if (tg.HapticFeedback && tg.HapticFeedback.impactOccurred) {
-                tg.HapticFeedback.impactOccurred('light');
-            }
-        } catch(e) {}
-    }
-
-    // Обработчик клика
     function handleClick() {
         score++;
-        updateDisplay();
-        vibrate();
+        scoreElement.innerText = score;
         // Анимация
         clickableImage.style.transform = 'scale(0.95)';
-        setTimeout(() => {
-            clickableImage.style.transform = 'scale(1)';
-        }, 100);
-        // Сохраняем (можно добавить throttle, но пока просто)
+        setTimeout(() => clickableImage.style.transform = 'scale(1)', 100);
+        // Вибрация
+        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+        // Сохраняем
         saveScore();
     }
 
-    // Назначаем обработчик
     clickableImage.addEventListener('click', handleClick);
-    clickableImage.onclick = handleClick;
-
-    // Загружаем счёт при старте
     loadScore();
 })();

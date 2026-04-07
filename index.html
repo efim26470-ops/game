@@ -88,9 +88,10 @@
         </div>
     </div>
 
-    <script src="script.js?v=20260407"></script>
+    <!-- Подключаем основной скрипт игры с версией для сброса кэша -->
+    <script src="script.js?v=3"></script>
     <script>
-        // Отдельный скрипт для работы с топом (не зависит от основного)
+        // Отдельный скрипт для работы с топом
         const modal = document.getElementById('topModal');
         const topButton = document.getElementById('topButton');
         const closeModalBtn = document.getElementById('closeModal');
@@ -104,7 +105,7 @@
                 if (data.top && data.top.length > 0) {
                     let html = '<ol>';
                     data.top.forEach((item, index) => {
-                        html += `<li><strong>${item.username || 'Аноним'}</strong> — ${item.score} 💥</li>`;
+                        html += `<li><strong>${escapeHtml(item.username || 'Аноним')}</strong> — ${item.score} 💥</li>`;
                     });
                     html += '</ol>';
                     topListDiv.innerHTML = html;
@@ -115,6 +116,16 @@
                 console.error(err);
                 topListDiv.innerHTML = '<p>Ошибка загрузки топа</p>';
             }
+        }
+
+        function escapeHtml(str) {
+            if (!str) return 'Аноним';
+            return str.replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            });
         }
 
         topButton.addEventListener('click', () => {

@@ -7,7 +7,6 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo, Message
 from aiohttp import web
 import asyncpg
-import json
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -97,7 +96,7 @@ async def start_command(message: Message):
 async def top_command(message: Message):
     top = await get_top_scores()
     if not top:
-        await message.answer("Пока нет ни одного игрока в таблице лидеров. Будь первым!")
+        await message.answer("Пока нет ни одного игрока. Будь первым!")
         return
     text = "🏆 *Топ игроков* 🏆\n\n"
     for i, row in enumerate(top, 1):
