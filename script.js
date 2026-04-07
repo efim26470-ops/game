@@ -1,64 +1,55 @@
-const tg = window.Telegram.WebApp;
-tg.expand();
-tg.ready();
+(function() {
+    // Инициализация Telegram WebApp
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+    tg.ready();
 
-const scoreElement = document.getElementById('score');
-const clickableImage = document.getElementById('clickableImage');
+    // Получаем элементы
+    const scoreElement = document.getElementById('score');
+    const clickableImage = document.getElementById('clickableImage');
 
-let score = 0;
-let userId = tg.initDataUnsafe?.user?.id; // получаем ID пользователя Telegram
-
-if (!userId) {
-    console.warn("No user id, using fallback");
-    userId = 0;
-}
-
-// Загружаем сохранённый счёт с сервера
-async function loadScore() {
-    try {
-        const response = await fetch(`/get_score?user_id=${userId}`);
-        if (response.ok) {
-            const data = await response.json();
-            score = data.score || 0;
-            scoreElement.innerText = score;
-        }
-    } catch(e) {
-        console.error("Failed to load score:", e);
+    // Проверяем, что элементы существуют
+    if (!scoreElement) {
+        console.error('Ошибка: элемент #score не найден');
+        return;
     }
-}
-
-// Отправляем обновлённый счёт на сервер
-async function saveScore(newScore) {
-    try {
-        await fetch('/update_score', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId, score: newScore })
-        });
-    } catch(e) {
-        console.error("Failed to save score:", e);
+    if (!clickableImage) {
+        console.error('Ошибка: элемент #clickableImage не найден');
+        return;
     }
-}
 
-function vibrate() {
-    try {
-        if (tg.HapticFeedback && tg.HapticFeedback.impactOccurred) {
-            tg.HapticFeedback.impactOccurred('light');
+    let score = 0;
+
+    // Функция обновления счёта на экране
+    function updateScore() {
+        scoreElement.innerText = score;
+    }
+
+    // Функция вибрации (если поддерживается)
+    function vibrate() {
+        try {
+            if (tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred) {
+                tg.HapticFeedback.impactOccurred('light');
+            }
+        } catch(e) {
+            // Игнорируем ошибки вибрации
         }
-    } catch(e) {}
-}
+    }
 
-async function onClick() {
-    score++;
-    scoreElement.innerText = score;
-    vibrate();
-    // Анимация
-    clickableImage.style.transform = 'scale(0.95)';
-    setTimeout(() => { clickableImage.style.transform = 'scale(1)'; }, 100);
-    // Сохраняем на сервере (не ждём ответа, чтобы не тормозить интерфейс)
-    saveScore(score);
-}
+    // Обработчик клика
+    function handleClick() {
+        score++;
+        updateScore();
+        vibrate();
+        // Анимация нажатия
+        clickableImage.style.transform = 'scale(0.95)';
+        setTimeout(() => {
+            clickableImage.style.transform = 'scale(1)';
+        }, 100);
+    }
 
-clickableImage.addEventListener('click', onClick);
-// Загружаем счёт при старте
-loadScore();
+    // Назначаем обработчик
+    clickableImage.addEventListener('click', handleClick);
+    // Резервный вариант для старых браузеров
+    clickableImage.onclick = handleClick;
+})();
