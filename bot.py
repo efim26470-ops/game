@@ -4,23 +4,20 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from datetime import datetime
 
 # ---------- Конфигурация ----------
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Обязательно добавьте в Railway Variables
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
+# Railway сам подставляет RAILWAY_PUBLIC_DOMAIN, но можно указать вручную
+PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "game-zhelezkin.up.railway.app")
 WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"https://{os.getenv('RAILWAY_PUBLIC_DOMAIN', 'game-zhelezkin.up.railway.app')}{WEBHOOK_PATH}"
-# Если домен не задан, подставьте свой. В Railway можно получить через переменную RAILWAY_PUBLIC_DOMAIN.
+WEBHOOK_URL = f"https://{PUBLIC_DOMAIN}{WEBHOOK_PATH}"
 
-# ---------- Инициализация бота и диспетчера ----------
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
-# Глобальная переменная для пула соединений с БД
 db_pool = None
 
-# ---------- Работа с базой данных ----------
+# ---------- Инициализация БД ----------
 async def init_db():
     global db_pool
     db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
@@ -34,7 +31,7 @@ async def init_db():
                 last_updated TIMESTAMP DEFAULT NOW()
             )
         """)
-    print("Database initialized and table ready")
+    print("✅ Database initialized")
 
 async def get_user_score(user_id: int) -> int:
     async with db_pool.acquire() as conn:
@@ -63,7 +60,7 @@ async def get_top_users(limit: int = 10):
         """, limit)
         return [{"username": r["username"] or "Anonymous", "first_name": r["first_name"], "score": r["score"]} for r in rows]
 
-# ---------- Обработчики команд ----------
+# ---------- Обработчики команд Telegram ----------
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
@@ -84,8 +81,7 @@ async def cmd_click(message: types.Message):
 
 @dp.message(Command("profile"))
 async def cmd_profile(message: types.Message):
-    user_id = message.from_user.id
-    score = await get_user_score(user_id)
+    score = await get_user_score(message.from_user.id)
     await message.answer(f"📊 Твой счёт: {score} очков.")
 
 @dp.message(Command("top"))
@@ -100,7 +96,7 @@ async def cmd_top(message: types.Message):
         text += f"{i}. {name} — {user['score']} очков\n"
     await message.answer(text)
 
-# ---------- Веб-обработчики (статический сайт + API) ----------
+# ---------- Веб-обработчики для статики и API ----------
 async def handle_index(request):
     return web.FileResponse("index.html")
 
@@ -117,23 +113,22 @@ async def handle_api_top(request):
     top = await get_top_users(10)
     return web.json_response(top)
 
-# ---------- Основная функция запуска ----------
+# ---------- Жизненный цикл приложения ----------
 async def on_startup():
     await init_db()
-    # Устанавливаем вебхук Telegram
     await bot.set_webhook(WEBHOOK_URL)
-    print(f"Webhook set to {WEBHOOK_URL}")
+    print(f"✅ Webhook set to {WEBHOOK_URL}")
 
 async def on_shutdown():
     await bot.delete_webhook()
     if db_pool:
         await db_pool.close()
-    print("Shutdown complete")
+    print("🛑 Shutdown complete")
 
 def main():
     app = web.Application()
     
-    # Статические файлы
+    # Статические маршруты
     app.router.add_get("/", handle_index)
     app.router.add_get("/index.html", handle_index)
     app.router.add_get("/script.js", handle_script)
@@ -145,7 +140,7 @@ def main():
     webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_requests_handler.register(app, path=WEBHOOK_PATH)
     
-    # Настройка жизненного цикла
+    # Настройка startup/shutdown
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
     setup_application(app, dp, bot=bot)
