@@ -5,7 +5,6 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
-# ---------- Конфигурация ----------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "game-zhelezkin.up.railway.app")
@@ -16,7 +15,6 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 db_pool = None
 
-# ---------- База данных ----------
 async def init_db():
     global db_pool
     db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
@@ -59,7 +57,6 @@ async def get_top_users(limit: int = 10):
         """, limit)
         return [{"username": r["username"] or "Anonymous", "first_name": r["first_name"], "score": r["score"]} for r in rows]
 
-# ---------- Команды бота ----------
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
@@ -95,7 +92,6 @@ async def cmd_top(message: types.Message):
         text += f"{i}. {name} — {user['score']} очков\n"
     await message.answer(text)
 
-# ---------- Веб-обработчики (статический сайт + API) ----------
 async def handle_index(request):
     return web.FileResponse("index.html")
 
@@ -112,7 +108,6 @@ async def handle_api_top(request):
     top = await get_top_users(10)
     return web.json_response(top)
 
-# ---------- Жизненный цикл приложения (с правильными сигнатурами) ----------
 async def on_startup(app: web.Application):
     await init_db()
     await bot.set_webhook(WEBHOOK_URL)
@@ -126,8 +121,6 @@ async def on_shutdown(app: web.Application):
 
 def main():
     app = web.Application()
-    
-    # Статические маршруты
     app.router.add_get("/", handle_index)
     app.router.add_get("/index.html", handle_index)
     app.router.add_get("/script.js", handle_script)
@@ -135,11 +128,9 @@ def main():
     app.router.add_get("/fem_logo.png", handle_logo)
     app.router.add_get("/api/top", handle_api_top)
     
-    # Webhook для Telegram
     webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_requests_handler.register(app, path=WEBHOOK_PATH)
     
-    # Регистрируем startup/shutdown с правильными сигнатурами
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
     
